@@ -2,7 +2,7 @@
   "name": "kk-markdown-live",
   "displayName": "KK Markdown Live",
   "description": "右键在 Chrome 中预览 Markdown，保存即刷新，方便查看需求文档",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "kk",
   "license": "MIT",
   "engines": {

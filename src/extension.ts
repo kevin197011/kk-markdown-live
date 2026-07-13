@@ -22,13 +22,26 @@ function getConfig() {
 async function ensureServer(): Promise<PreviewServer> {
   if (!server) {
     const { port, theme } = getConfig();
-    server = new PreviewServer(port, extensionPath, theme);
-    await server.start();
+    const srv = new PreviewServer(port, extensionPath, theme);
+    srv.setOnIdle(() => {
+      void stopServerIfIdle();
+    });
+    await srv.start();
+    server = srv;
     statusBar.text = `$(radio-tower) KK Preview :${server.getPort()}`;
     statusBar.tooltip = 'KK Markdown Live 预览服务运行中';
     statusBar.show();
   }
   return server;
+}
+
+async function stopServerIfIdle(): Promise<void> {
+  if (!server || server.hasActiveClients() || server.getSessionCount() > 0) {
+    return;
+  }
+  await server.stop();
+  server = undefined;
+  statusBar.hide();
 }
 
 function readFileContent(filePath: string): string {

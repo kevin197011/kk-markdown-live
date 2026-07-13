@@ -391,6 +391,7 @@ function previewPageHtml(
       let theme = localStorage.getItem(STORAGE_KEY) || serverDefault;
       if (themeOrder.indexOf(theme) < 0) theme = 'auto';
       let ws;
+      let intentionalClose = false;
       let mermaidSources = new WeakMap();
       let tocObserver = null;
 
@@ -553,11 +554,18 @@ function previewPageHtml(
           } catch (_) {}
         };
         ws.onclose = function () {
+          if (intentionalClose) return;
           status.textContent = '连接断开，重连中…';
           status.classList.remove('live');
           setTimeout(connect, 1500);
         };
       }
+      window.addEventListener('beforeunload', function () {
+        intentionalClose = true;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      });
       connect();
     })();
   </script>
@@ -573,11 +581,62 @@ export class PreviewServer {
   private mediaDir: string;
   private defaultTheme: string;
   private started = false;
+  private onIdle: (() => void) | undefined;
+  private pruneTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(port: number, extensionPath: string, defaultTheme = 'auto') {
     this.port = port;
     this.mediaDir = path.join(extensionPath, 'media');
     this.defaultTheme = defaultTheme;
+  }
+
+  setOnIdle(callback: () => void): void {
+    this.onIdle = callback;
+  }
+
+  getSessionCount(): number {
+    return this.sessions.size;
+  }
+
+  hasActiveClients(): boolean {
+    for (const session of this.sessions.values()) {
+      if (session.clients.size > 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private pruneSession(sid: string): void {
+    const session = this.sessions.get(sid);
+    if (session && session.clients.size === 0) {
+      this.sessions.delete(sid);
+      if (this.sessions.size === 0) {
+        this.onIdle?.();
+      }
+    }
+  }
+
+  private schedulePrune(sid: string): void {
+    const existing = this.pruneTimers.get(sid);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    this.pruneTimers.set(
+      sid,
+      setTimeout(() => {
+        this.pruneTimers.delete(sid);
+        this.pruneSession(sid);
+      }, 2000),
+    );
+  }
+
+  private cancelPrune(sid: string): void {
+    const t = this.pruneTimers.get(sid);
+    if (t) {
+      clearTimeout(t);
+      this.pruneTimers.delete(sid);
+    }
   }
 
   get isRunning(): boolean {
@@ -605,8 +664,14 @@ export class PreviewServer {
         return;
       }
       this.wss!.handleUpgrade(req, socket, head, (ws) => {
+        this.cancelPrune(sid);
         session.clients.add(ws);
-        ws.on('close', () => session.clients.delete(ws));
+        ws.on('close', () => {
+          session.clients.delete(ws);
+          if (session.clients.size === 0) {
+            this.schedulePrune(sid);
+          }
+        });
       });
     });
 
@@ -652,7 +717,7 @@ export class PreviewServer {
   pushUpdate(filePath: string, source: string): void {
     const sid = sessionId(filePath);
     const session = this.sessions.get(sid);
-    if (!session) {
+    if (!session || session.clients.size === 0) {
       return;
     }
     const html = renderMarkdown(filePath, source);
@@ -740,6 +805,10 @@ export class PreviewServer {
   }
 
   async stop(): Promise<void> {
+    for (const t of this.pruneTimers.values()) {
+      clearTimeout(t);
+    }
+    this.pruneTimers.clear();
     for (const session of this.sessions.values()) {
       for (const client of session.clients) {
         client.close();
