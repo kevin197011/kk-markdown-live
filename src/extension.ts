@@ -1,0 +1,150 @@
+import * as cp from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as vscode from 'vscode';
+import { PreviewServer } from './preview';
+
+let extensionPath = '';
+let server: PreviewServer | undefined;
+const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+
+function getConfig() {
+  const cfg = vscode.workspace.getConfiguration('kk-markdown-live');
+  return {
+    port: cfg.get<number>('port', 19527),
+    browser: cfg.get<string>('browser', 'Google Chrome'),
+    debounceMs: cfg.get<number>('debounceMs', 300),
+  };
+}
+
+async function ensureServer(): Promise<PreviewServer> {
+  if (!server) {
+    const { port } = getConfig();
+    server = new PreviewServer(port, extensionPath);
+    await server.start();
+    statusBar.text = `$(radio-tower) KK Preview :${server.getPort()}`;
+    statusBar.tooltip = 'KK Markdown Live 预览服务运行中';
+    statusBar.show();
+  }
+  return server;
+}
+
+function readFileContent(filePath: string): string {
+  const uri = vscode.Uri.file(filePath);
+  const openDoc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === filePath);
+  if (openDoc) {
+    return openDoc.getText();
+  }
+  return fs.readFileSync(filePath, 'utf8');
+}
+
+function openInChrome(url: string, newWindow: boolean): void {
+  const { browser } = getConfig();
+  if (process.platform === 'darwin') {
+    const args = ['-a', browser];
+    if (newWindow) {
+      args.push('-n');
+    }
+    args.push(url);
+    cp.spawn('open', args, { detached: true, stdio: 'ignore' }).unref();
+    return;
+  }
+  if (process.platform === 'win32') {
+    const chromePaths = [
+      path.join(process.env.LOCALAPPDATA || '', 'Google/Chrome/Application/chrome.exe'),
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    ];
+    const chrome = chromePaths.find((p) => fs.existsSync(p));
+    if (chrome) {
+      const args = newWindow ? ['--new-window', url] : [url];
+      cp.spawn(chrome, args, { detached: true, stdio: 'ignore' }).unref();
+      return;
+    }
+  }
+  vscode.env.openExternal(vscode.Uri.parse(url));
+}
+
+async function openPreview(uri?: vscode.Uri, newWindow = false): Promise<void> {
+  const target = uri ?? vscode.window.activeTextEditor?.document.uri;
+  if (!target) {
+    vscode.window.showWarningMessage('请先打开一个 Markdown 文件');
+    return;
+  }
+  if (!target.fsPath.endsWith('.md')) {
+    vscode.window.showWarningMessage('仅支持 .md 文件预览');
+    return;
+  }
+
+  try {
+    const srv = await ensureServer();
+    const content = readFileContent(target.fsPath);
+    const url = srv.register(target.fsPath, content);
+    openInChrome(url, newWindow);
+    vscode.window.setStatusBarMessage(`$(open-preview) Chrome 预览: ${path.basename(target.fsPath)}`, 3000);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`预览启动失败: ${msg}`);
+  }
+}
+
+function schedulePush(filePath: string): void {
+  const { debounceMs } = getConfig();
+  const existing = debounceTimers.get(filePath);
+  if (existing) {
+    clearTimeout(existing);
+  }
+  debounceTimers.set(
+    filePath,
+    setTimeout(() => {
+      debounceTimers.delete(filePath);
+      if (!server?.isRunning) {
+        return;
+      }
+      try {
+        const content = readFileContent(filePath);
+        server.pushUpdate(filePath, content);
+      } catch {
+        // file may be deleted
+      }
+    }, debounceMs),
+  );
+}
+
+export function activate(context: vscode.ExtensionContext): void {
+  extensionPath = context.extensionPath;
+  context.subscriptions.push(
+    vscode.commands.registerCommand('kk-markdown-live.openPreview', (uri?: vscode.Uri) =>
+      openPreview(uri, false),
+    ),
+    vscode.commands.registerCommand('kk-markdown-live.openPreviewToSide', (uri?: vscode.Uri) =>
+      openPreview(uri, true),
+    ),
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      if (e.document.languageId !== 'markdown') {
+        return;
+      }
+      schedulePush(e.document.uri.fsPath);
+    }),
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      if (doc.languageId !== 'markdown' || !server?.isRunning) {
+        return;
+      }
+      server.pushUpdate(doc.uri.fsPath, doc.getText());
+    }),
+    statusBar,
+  );
+}
+
+export async function deactivate(): Promise<void> {
+  for (const t of debounceTimers.values()) {
+    clearTimeout(t);
+  }
+  debounceTimers.clear();
+  statusBar.dispose();
+  if (server) {
+    await server.stop();
+    server = undefined;
+  }
+}
