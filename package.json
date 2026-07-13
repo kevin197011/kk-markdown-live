@@ -2,7 +2,7 @@
   "name": "kk-markdown-live",
   "displayName": "KK Markdown Live",
   "description": "右键在 Chrome 中预览 Markdown，保存即刷新，方便查看需求文档",
-  "version": "0.2.0",
+  "version": "0.4.1",
   "publisher": "kk",
   "license": "MIT",
   "engines": {
@@ -74,6 +74,12 @@
           "type": "number",
           "default": 300,
           "description": "编辑时刷新防抖毫秒数"
+        },
+        "kk-markdown-live.theme": {
+          "type": "string",
+          "enum": ["auto", "light", "dark"],
+          "default": "auto",
+          "description": "预览页默认主题（浏览器内可点击切换，选择会记住）"
         }
       }
     }

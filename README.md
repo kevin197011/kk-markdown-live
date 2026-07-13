@@ -9,6 +9,7 @@
 - **代码块语法高亮**（highlight.js，支持 js/ts/py/go/rust/bash/json/yaml/sql 等）
 - **Mermaid 图表**（` ```mermaid ` 代码块）
 - 本地图片相对路径自动解析
+- **左侧目录**：自动提取 h1–h6 标题，点击跳转，滚动高亮当前章节
 - 浅色/深色跟随系统
 - 端口占用自动递增
 
@@ -75,6 +76,9 @@ graph LR
 | `kk-markdown-live.port` | `19527` | HTTP 预览端口 |
 | `kk-markdown-live.browser` | `Google Chrome` | macOS `open -a` 浏览器名 |
 | `kk-markdown-live.debounceMs` | `300` | 输入时刷新防抖 |
+| `kk-markdown-live.theme` | `auto` | 默认主题：`auto` / `light` / `dark` |
+
+预览页右上角 **主题** 按钮可循环切换：跟随系统 → 浅色 → 深色；选择保存在浏览器 localStorage。
 
 ## 技术说明
 

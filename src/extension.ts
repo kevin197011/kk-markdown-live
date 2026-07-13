@@ -15,13 +15,14 @@ function getConfig() {
     port: cfg.get<number>('port', 19527),
     browser: cfg.get<string>('browser', 'Google Chrome'),
     debounceMs: cfg.get<number>('debounceMs', 300),
+    theme: cfg.get<string>('theme', 'auto'),
   };
 }
 
 async function ensureServer(): Promise<PreviewServer> {
   if (!server) {
-    const { port } = getConfig();
-    server = new PreviewServer(port, extensionPath);
+    const { port, theme } = getConfig();
+    server = new PreviewServer(port, extensionPath, theme);
     await server.start();
     statusBar.text = `$(radio-tower) KK Preview :${server.getPort()}`;
     statusBar.tooltip = 'KK Markdown Live 预览服务运行中';
