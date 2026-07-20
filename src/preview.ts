@@ -228,16 +228,13 @@ const PREVIEW_CSS = `
   .header-btn:hover { opacity: 0.85; }
   .header-btn:disabled { opacity: 0.5; cursor: wait; }
   #pdf-export-root {
-    position: fixed;
-    left: -10000px;
-    top: 0;
+    /* ponytail: html2pdf clones into overflow:hidden overlay — position:fixed paints outside it → blank PDF */
+    position: relative;
     width: 800px;
-    display: flex;
-    align-items: flex-start;
-    gap: 0;
-    background: #fafafa;
+    margin: 0 auto;
+    background: #ffffff;
     color: #1a1a1a;
-    --bg: #fafafa;
+    --bg: #ffffff;
     --fg: #1a1a1a;
     --muted: #666;
     --border: #e5e5e5;
@@ -247,13 +244,20 @@ const PREVIEW_CSS = `
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     font-size: 16px;
     line-height: 1.6;
+    overflow: visible;
+  }
+  #pdf-export-root::after {
+    content: '';
+    display: table;
+    clear: both;
   }
   #pdf-export-root .pdf-toc {
-    flex: 0 0 200px;
+    float: left;
     width: 200px;
     padding: 24px 12px 32px 16px;
     border-right: 1px solid #e5e5e5;
     font-size: 13px;
+    box-sizing: border-box;
   }
   #pdf-export-root .pdf-toc .toc-title {
     font-size: 11px;
@@ -283,9 +287,9 @@ const PREVIEW_CSS = `
   #pdf-export-root .pdf-toc .toc-h5 { padding-left: 40px; font-size: 11px; }
   #pdf-export-root .pdf-toc .toc-h6 { padding-left: 48px; font-size: 11px; }
   #pdf-export-root .pdf-main {
-    flex: 1;
-    min-width: 0;
+    margin-left: 200px;
     padding: 24px 28px 48px;
+    box-sizing: border-box;
   }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
   html { scroll-behavior: smooth; }
@@ -670,14 +674,27 @@ function previewPageHtml(
         fontsReady
           .then(function () { return waitForImages(root, 3000); })
           .then(function () {
+            return new Promise(function (resolve) {
+              requestAnimationFrame(function () { requestAnimationFrame(resolve); });
+            });
+          })
+          .then(function () {
+            void root.offsetHeight;
             return html2pdf()
               .set({
-                margin: [10, 10, 10, 10],
+                margin: [12, 12, 12, 12],
                 filename: pdfFileName(),
                 image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2, useCORS: true, logging: false },
+                html2canvas: {
+                  scale: 2,
+                  useCORS: true,
+                  logging: false,
+                  backgroundColor: '#ffffff',
+                  scrollX: 0,
+                  scrollY: 0,
+                },
                 jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                pagebreak: { mode: ['css', 'legacy'] },
+                pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
               })
               .from(root)
               .save();
