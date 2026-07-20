@@ -12,6 +12,7 @@
 - **左侧目录**：自动提取 h1–h6 标题，点击跳转，滚动高亮当前章节
 - **自动回收**：关闭全部预览标签后，HTTP 服务自动停止，释放内存
 - 浅色/深色跟随系统
+- **导出 PDF**：预览页右上角一键下载（目录 + 正文，浅色排版）
 - 端口占用自动递增
 
 ## 安装
@@ -45,7 +46,9 @@ Cursor / VS Code：**Extensions → ... → Install from VSIX**，选择生成�
 | 资源管理器 `.md` 右键 | 同上 |
 | 命令面板 | `KK Markdown Live: 在 Chrome 中预览 Markdown` |
 
-预览页顶部绿点表示 WebSocket 已连接；修改文档后内容自动更新。
+预览页顶部绿点表示 WebSocket 已连接；修改文档后内容自动更新。右上角 **导出 PDF** 可直接下载当前文档（含目录与正文，始终浅色）。
+
+详细需求见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)。
 
 ### 代码高亮
 

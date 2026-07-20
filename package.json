@@ -2,9 +2,13 @@
   "name": "kk-markdown-live",
   "displayName": "KK Markdown Live",
   "description": "右键在 Chrome 中预览 Markdown，保存即刷新，方便查看需求文档",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "publisher": "kk",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kevin197011/kk-markdown-live.git"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -77,7 +81,11 @@
         },
         "kk-markdown-live.theme": {
           "type": "string",
-          "enum": ["auto", "light", "dark"],
+          "enum": [
+            "auto",
+            "light",
+            "dark"
+          ],
           "default": "auto",
           "description": "预览页默认主题（浏览器内可点击切换，选择会记住）"
         }
@@ -102,6 +110,7 @@
   },
   "dependencies": {
     "highlight.js": "^11.10.0",
+    "html2pdf.js": "^0.14.0",
     "marked": "^12.0.2",
     "mermaid": "^11.4.0",
     "ws": "^8.18.0"

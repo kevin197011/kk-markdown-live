@@ -214,7 +214,7 @@ const PREVIEW_CSS = `
     background: #3fb950;
     animation: pulse 2s ease-in-out infinite;
   }
-  #theme-toggle {
+  .header-btn {
     cursor: pointer;
     border: 1px solid var(--btn-border);
     background: var(--btn-bg);
@@ -225,7 +225,68 @@ const PREVIEW_CSS = `
     line-height: 1.4;
     white-space: nowrap;
   }
-  #theme-toggle:hover { opacity: 0.85; }
+  .header-btn:hover { opacity: 0.85; }
+  .header-btn:disabled { opacity: 0.5; cursor: wait; }
+  #pdf-export-root {
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    width: 800px;
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    background: #fafafa;
+    color: #1a1a1a;
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #666;
+    --border: #e5e5e5;
+    --code-bg: #f4f4f5;
+    --link: #0969da;
+    --blockquote: #57606a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  #pdf-export-root .pdf-toc {
+    flex: 0 0 200px;
+    width: 200px;
+    padding: 24px 12px 32px 16px;
+    border-right: 1px solid #e5e5e5;
+    font-size: 13px;
+  }
+  #pdf-export-root .pdf-toc .toc-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #666;
+    margin: 0 0 10px 8px;
+  }
+  #pdf-export-root .pdf-toc .toc-empty {
+    color: #666;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+  #pdf-export-root .pdf-toc a,
+  #pdf-export-root .pdf-toc .toc-item {
+    display: block;
+    padding: 4px 8px;
+    color: #666;
+    text-decoration: none;
+    line-height: 1.4;
+  }
+  #pdf-export-root .pdf-toc .toc-h1 { padding-left: 8px; font-weight: 600; color: #1a1a1a; }
+  #pdf-export-root .pdf-toc .toc-h2 { padding-left: 16px; }
+  #pdf-export-root .pdf-toc .toc-h3 { padding-left: 24px; font-size: 12px; }
+  #pdf-export-root .pdf-toc .toc-h4 { padding-left: 32px; font-size: 12px; }
+  #pdf-export-root .pdf-toc .toc-h5 { padding-left: 40px; font-size: 11px; }
+  #pdf-export-root .pdf-toc .toc-h6 { padding-left: 48px; font-size: 11px; }
+  #pdf-export-root .pdf-main {
+    flex: 1;
+    min-width: 0;
+    padding: 24px 28px 48px;
+  }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
   html { scroll-behavior: smooth; }
   .page {
@@ -363,7 +424,8 @@ function previewPageHtml(
       <span class="filepath" title="${escapeHtml(filePath)}">${escapeHtml(filePath)}</span>
     </div>
     <div class="actions">
-      <button type="button" id="theme-toggle" title="切换浅色 / 深色 / 跟随系统">主题</button>
+      <button type="button" class="header-btn" id="pdf-export" title="导出为 PDF">导出 PDF</button>
+      <button type="button" class="header-btn" id="theme-toggle" title="切换浅色 / 深色 / 跟随系统">主题</button>
       <span class="status live" id="status">实时预览</span>
     </div>
   </header>
@@ -377,13 +439,16 @@ function previewPageHtml(
     </main>
   </div>
   <script src="/vendor/mermaid.min.js"></script>
+  <script src="/vendor/html2pdf.bundle.min.js"></script>
   <script>
     (function () {
       const content = document.getElementById('content');
       const status = document.getElementById('status');
       const themeBtn = document.getElementById('theme-toggle');
+      const pdfBtn = document.getElementById('pdf-export');
       const toc = document.getElementById('toc');
       const tocNav = document.getElementById('toc-nav');
+      const docTitle = ${JSON.stringify(title)};
       const STORAGE_KEY = 'kk-markdown-live-theme';
       const serverDefault = '${safeTheme}';
       const themeOrder = ['auto', 'light', 'dark'];
@@ -524,7 +589,112 @@ function previewPageHtml(
         renderMermaid();
       }
 
+      function pdfFileName() {
+        var raw = docTitle || 'preview';
+        var base = raw;
+        if (raw.length > 3 && raw.slice(-3).toLowerCase() === '.md') {
+          base = raw.slice(0, -3);
+        }
+        return (base || 'preview') + '.pdf';
+      }
+
+      function waitForImages(root, timeoutMs) {
+        const imgs = Array.prototype.slice.call(root.querySelectorAll('img'));
+        if (!imgs.length) return Promise.resolve();
+        return Promise.race([
+          Promise.all(imgs.map(function (img) {
+            if (img.complete) return Promise.resolve();
+            return new Promise(function (resolve) {
+              img.addEventListener('load', resolve, { once: true });
+              img.addEventListener('error', resolve, { once: true });
+            });
+          })),
+          new Promise(function (resolve) { setTimeout(resolve, timeoutMs); }),
+        ]);
+      }
+
+      function buildPdfRoot() {
+        const root = document.createElement('div');
+        root.id = 'pdf-export-root';
+
+        const tocWrap = document.createElement('aside');
+        tocWrap.className = 'pdf-toc';
+        const tocTitle = document.createElement('div');
+        tocTitle.className = 'toc-title';
+        tocTitle.textContent = '目录';
+        tocWrap.appendChild(tocTitle);
+
+        const links = tocNav.querySelectorAll('a');
+        if (!links.length) {
+          const empty = document.createElement('div');
+          empty.className = 'toc-empty';
+          empty.textContent = '（无目录）';
+          tocWrap.appendChild(empty);
+        } else {
+          links.forEach(function (a) {
+            const item = document.createElement('div');
+            item.className = a.className;
+            item.textContent = a.textContent || '';
+            tocWrap.appendChild(item);
+          });
+        }
+
+        const main = document.createElement('div');
+        main.className = 'pdf-main';
+        const article = document.createElement('article');
+        article.className = 'markdown-body';
+        article.innerHTML = content.innerHTML;
+        main.appendChild(article);
+
+        root.appendChild(tocWrap);
+        root.appendChild(main);
+        document.body.appendChild(root);
+        return root;
+      }
+
+      function exportPdf() {
+        if (pdfBtn.disabled) return;
+        if (typeof html2pdf === 'undefined') {
+          alert('PDF 导出库未加载，请重新打开预览或运行 npm install');
+          return;
+        }
+        pdfBtn.disabled = true;
+        const prevLabel = pdfBtn.textContent;
+        pdfBtn.textContent = '导出中…';
+
+        const root = buildPdfRoot();
+        const fontsReady = (document.fonts && document.fonts.ready)
+          ? document.fonts.ready.catch(function () {})
+          : Promise.resolve();
+
+        fontsReady
+          .then(function () { return waitForImages(root, 3000); })
+          .then(function () {
+            return html2pdf()
+              .set({
+                margin: [10, 10, 10, 10],
+                filename: pdfFileName(),
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2, useCORS: true, logging: false },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                pagebreak: { mode: ['css', 'legacy'] },
+              })
+              .from(root)
+              .save();
+          })
+          .catch(function (err) {
+            console.error(err);
+            alert('导出 PDF 失败，请重试');
+          })
+          .then(function () {
+            if (root.parentNode) root.parentNode.removeChild(root);
+            pdfBtn.disabled = false;
+            pdfBtn.textContent = prevLabel;
+          });
+      }
+
       themeBtn.addEventListener('click', cycleTheme);
+      pdfBtn.addEventListener('click', exportPdf);
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
         if (theme === 'auto') applyTheme();
       });
@@ -766,6 +936,18 @@ export class PreviewServer {
       if (!fs.existsSync(file)) {
         res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('mermaid.min.js missing — run npm install');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
+      fs.createReadStream(file).pipe(res);
+      return;
+    }
+
+    if (url.pathname === '/vendor/html2pdf.bundle.min.js') {
+      const file = path.join(this.mediaDir, 'html2pdf.bundle.min.js');
+      if (!fs.existsSync(file)) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('html2pdf.bundle.min.js missing — run npm install');
         return;
       }
       res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
