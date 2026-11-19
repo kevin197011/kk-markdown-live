@@ -1,111 +1,120 @@
-import * as crypto from 'crypto';
-import * as fs from 'fs';
-import * as http from 'http';
-import * as path from 'path';
-import { marked, Renderer } from 'marked';
-import { WebSocket, WebSocketServer } from 'ws';
-import { highlightCode } from './highlight';
-import { HLJS_CSS } from './styles';
+import * as crypto from "crypto";
+import * as fs from "fs";
+import * as http from "http";
+import * as os from "os";
+import * as path from "path";
+import { marked, Renderer } from "marked";
+import { WebSocket, WebSocketServer } from "ws";
+import { highlightCode } from "./highlight";
+import { HLJS_CSS } from "./styles";
+import { printUrlToPdf, resolveChromeExecutable } from "./chrome-pdf";
 
 export interface PreviewSession {
-  filePath: string;
-  clients: Set<WebSocket>;
+	filePath: string;
+	clients: Set<WebSocket>;
 }
 
 function sessionId(filePath: string): string {
-  return crypto.createHash('sha1').update(filePath).digest('hex').slice(0, 12);
+	return crypto.createHash("sha1").update(filePath).digest("hex").slice(0, 12);
 }
 
 function filePathInUrl(filePath: string): string {
-  const normalized = path.normalize(filePath);
-  const segments = normalized.split(path.sep).filter(Boolean).map(encodeURIComponent);
-  return segments.join('/');
+	const normalized = path.normalize(filePath);
+	const segments = normalized
+		.split(path.sep)
+		.filter(Boolean)
+		.map(encodeURIComponent);
+	return segments.join("/");
 }
 
-function parsePreviewRoute(pathname: string): { sid: string; filePathHint?: string } | null {
-  const match = pathname.match(/^\/preview\/([a-f0-9]{12})(?:\/(.*))?$/);
-  if (!match) {
-    return null;
-  }
-  const sid = match[1];
-  const rest = match[2];
-  if (!rest) {
-    return { sid };
-  }
-  const filePathHint = rest
-    .split('/')
-    .map((seg) => decodeURIComponent(seg))
-    .join(path.sep);
-  const absolute = path.isAbsolute(filePathHint) ? filePathHint : path.join(path.sep, filePathHint);
-  return { sid, filePathHint: absolute };
+function parsePreviewRoute(
+	pathname: string,
+): { sid: string; filePathHint?: string } | null {
+	const match = pathname.match(/^\/preview\/([a-f0-9]{12})(?:\/(.*))?$/);
+	if (!match) {
+		return null;
+	}
+	const sid = match[1];
+	const rest = match[2];
+	if (!rest) {
+		return { sid };
+	}
+	const filePathHint = rest
+		.split("/")
+		.map((seg) => decodeURIComponent(seg))
+		.join(path.sep);
+	const absolute = path.isAbsolute(filePathHint)
+		? filePathHint
+		: path.join(path.sep, filePathHint);
+	return { sid, filePathHint: absolute };
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+	return s
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;");
 }
 
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, '').trim();
+	return html.replace(/<[^>]+>/g, "").trim();
 }
 
 function makeSlugger() {
-  const counts = new Map<string, number>();
-  return (text: string): string => {
-    const plain = stripHtml(text);
-    let base = plain
-      .toLowerCase()
-      .replace(/[^\w\u4e00-\u9fff\s-]/gi, '')
-      .trim()
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '');
-    if (!base) {
-      base = 'section';
-    }
-    const n = counts.get(base) ?? 0;
-    counts.set(base, n + 1);
-    return n > 0 ? `${base}-${n}` : base;
-  };
+	const counts = new Map<string, number>();
+	return (text: string): string => {
+		const plain = stripHtml(text);
+		let base = plain
+			.toLowerCase()
+			.replace(/[^\w\u4e00-\u9fff\s-]/gi, "")
+			.trim()
+			.replace(/\s+/g, "-")
+			.replace(/-+/g, "-")
+			.replace(/^-|-$/g, "");
+		if (!base) {
+			base = "section";
+		}
+		const n = counts.get(base) ?? 0;
+		counts.set(base, n + 1);
+		return n > 0 ? `${base}-${n}` : base;
+	};
 }
 
 function buildRenderer(mdFile: string): Renderer {
-  const slugger = makeSlugger();
-  const renderer = new Renderer();
-  renderer.heading = (text: string, level: number) => {
-    const id = slugger(text);
-    return `<h${level} id="${escapeHtml(id)}">${text}</h${level}>\n`;
-  };
-  renderer.image = (href: string, title: string | null, text: string) => {
-    if (!href) {
-      return '';
-    }
-    if (/^https?:\/\//i.test(href) || href.startsWith('data:')) {
-      const t = title ? ` title="${escapeHtml(title)}"` : '';
-      return `<img src="${href}" alt="${escapeHtml(text)}"${t}>`;
-    }
-    const abs = path.resolve(path.dirname(mdFile), href);
-    const url = `/asset?path=${encodeURIComponent(abs)}`;
-    const t = title ? ` title="${escapeHtml(title)}"` : '';
-    return `<img src="${url}" alt="${escapeHtml(text)}"${t}>`;
-  };
-  renderer.code = (code: string, infostring: string | undefined) => {
-    const lang = (infostring || '').trim().toLowerCase();
-    if (lang === 'mermaid') {
-      return `<div class="mermaid">${escapeHtml(code)}</div>\n`;
-    }
-    const { html, language } = highlightCode(code, lang || undefined);
-    return `<pre><code class="hljs language-${escapeHtml(language)}">${html}</code></pre>\n`;
-  };
-  return renderer;
+	const slugger = makeSlugger();
+	const renderer = new Renderer();
+	renderer.heading = (text: string, level: number) => {
+		const id = slugger(text);
+		return `<h${level} id="${escapeHtml(id)}">${text}</h${level}>\n`;
+	};
+	renderer.image = (href: string, title: string | null, text: string) => {
+		if (!href) {
+			return "";
+		}
+		if (/^https?:\/\//i.test(href) || href.startsWith("data:")) {
+			const t = title ? ` title="${escapeHtml(title)}"` : "";
+			return `<img src="${href}" alt="${escapeHtml(text)}"${t}>`;
+		}
+		const abs = path.resolve(path.dirname(mdFile), href);
+		const url = `/asset?path=${encodeURIComponent(abs)}`;
+		const t = title ? ` title="${escapeHtml(title)}"` : "";
+		return `<img src="${url}" alt="${escapeHtml(text)}"${t}>`;
+	};
+	renderer.code = (code: string, infostring: string | undefined) => {
+		const lang = (infostring || "").trim().toLowerCase();
+		if (lang === "mermaid") {
+			return `<div class="mermaid">${escapeHtml(code)}</div>\n`;
+		}
+		const { html, language } = highlightCode(code, lang || undefined);
+		return `<pre><code class="hljs language-${escapeHtml(language)}">${html}</code></pre>\n`;
+	};
+	return renderer;
 }
 
 export function renderMarkdown(mdFile: string, source: string): string {
-  const renderer = buildRenderer(mdFile);
-  return marked.parse(source, { async: false, renderer }) as string;
+	const renderer = buildRenderer(mdFile);
+	return marked.parse(source, { async: false, renderer }) as string;
 }
 
 const THEME_VARS = `
@@ -227,70 +236,6 @@ const PREVIEW_CSS = `
   }
   .header-btn:hover { opacity: 0.85; }
   .header-btn:disabled { opacity: 0.5; cursor: wait; }
-  #pdf-export-root {
-    /* ponytail: html2pdf clones into overflow:hidden overlay — position:fixed paints outside it → blank PDF */
-    position: relative;
-    width: 800px;
-    margin: 0 auto;
-    background: #ffffff;
-    color: #1a1a1a;
-    --bg: #ffffff;
-    --fg: #1a1a1a;
-    --muted: #666;
-    --border: #e5e5e5;
-    --code-bg: #f4f4f5;
-    --link: #0969da;
-    --blockquote: #57606a;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    font-size: 16px;
-    line-height: 1.6;
-    overflow: visible;
-  }
-  #pdf-export-root::after {
-    content: '';
-    display: table;
-    clear: both;
-  }
-  #pdf-export-root .pdf-toc {
-    float: left;
-    width: 200px;
-    padding: 24px 12px 32px 16px;
-    border-right: 1px solid #e5e5e5;
-    font-size: 13px;
-    box-sizing: border-box;
-  }
-  #pdf-export-root .pdf-toc .toc-title {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: #666;
-    margin: 0 0 10px 8px;
-  }
-  #pdf-export-root .pdf-toc .toc-empty {
-    color: #666;
-    padding: 4px 8px;
-    font-size: 12px;
-  }
-  #pdf-export-root .pdf-toc a,
-  #pdf-export-root .pdf-toc .toc-item {
-    display: block;
-    padding: 4px 8px;
-    color: #666;
-    text-decoration: none;
-    line-height: 1.4;
-  }
-  #pdf-export-root .pdf-toc .toc-h1 { padding-left: 8px; font-weight: 600; color: #1a1a1a; }
-  #pdf-export-root .pdf-toc .toc-h2 { padding-left: 16px; }
-  #pdf-export-root .pdf-toc .toc-h3 { padding-left: 24px; font-size: 12px; }
-  #pdf-export-root .pdf-toc .toc-h4 { padding-left: 32px; font-size: 12px; }
-  #pdf-export-root .pdf-toc .toc-h5 { padding-left: 40px; font-size: 11px; }
-  #pdf-export-root .pdf-toc .toc-h6 { padding-left: 48px; font-size: 11px; }
-  #pdf-export-root .pdf-main {
-    margin-left: 200px;
-    padding: 24px 28px 48px;
-    box-sizing: border-box;
-  }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
   html { scroll-behavior: smooth; }
   .page {
@@ -405,15 +350,104 @@ const PREVIEW_CSS = `
   .markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 2em 0; }
 `;
 
+function printPageHtml(title: string, bodyHtml: string): string {
+	return `<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    @page { size: A4; margin: 14mm 14mm; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      color: #1a1a1a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Helvetica, Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.55;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .markdown-body { max-width: none; }
+    .markdown-body h1, .markdown-body h2 { border-bottom: 1px solid #e5e5e5; padding-bottom: .25em; break-after: avoid; page-break-after: avoid; }
+    .markdown-body h1 { font-size: 1.7em; margin: 0 0 .6em; }
+    .markdown-body h2 { font-size: 1.3em; margin: 1.2em 0 .5em; }
+    .markdown-body h3 { font-size: 1.15em; margin: 1em 0 .4em; break-after: avoid; page-break-after: avoid; }
+    .markdown-body h4, .markdown-body h5, .markdown-body h6 { break-after: avoid; page-break-after: avoid; }
+    .markdown-body p, .markdown-body ul, .markdown-body ol { orphans: 3; widows: 3; }
+    .markdown-body code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: .9em;
+      padding: .15em .35em;
+      border-radius: 3px;
+      background: #f4f4f5;
+    }
+    .markdown-body pre {
+      overflow: visible;
+      white-space: pre-wrap;
+      word-break: break-word;
+      padding: 12px;
+      border-radius: 6px;
+      background: #f4f4f5;
+      border: 1px solid #e5e5e5;
+      margin: .8em 0;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .markdown-body pre code { padding: 0; background: none; }
+    .markdown-body .mermaid {
+      margin: 1em 0;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid #e5e5e5;
+      background: #f4f4f5;
+      text-align: center;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .markdown-body blockquote {
+      margin: 0;
+      padding: 0 1em;
+      color: #57606a;
+      border-left: 3px solid #e5e5e5;
+    }
+    .markdown-body table { border-collapse: collapse; width: 100%; margin: .8em 0; font-size: 0.92em; }
+    .markdown-body th, .markdown-body td { border: 1px solid #d0d7de; padding: 6px 8px; vertical-align: top; }
+    .markdown-body th { background: #f4f4f5; }
+    .markdown-body a { color: #0969da; text-decoration: none; }
+    .markdown-body img { max-width: 100%; height: auto; }
+    .markdown-body hr { border: none; border-top: 1px solid #e5e5e5; margin: 1.4em 0; }
+    ${HLJS_CSS}
+  </style>
+  <script src="/vendor/mermaid.min.js"></script>
+</head>
+<body>
+  <article class="markdown-body">${bodyHtml}</article>
+  <script>
+    (function () {
+      if (!window.mermaid) return;
+      mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+      mermaid.run({ querySelector: '.mermaid' }).catch(function () {});
+    })();
+  </script>
+</body>
+</html>`;
+}
+
 function previewPageHtml(
-  title: string,
-  bodyHtml: string,
-  wsPath: string,
-  defaultTheme: string,
-  filePath: string,
+	title: string,
+	bodyHtml: string,
+	wsPath: string,
+	defaultTheme: string,
+	filePath: string,
 ): string {
-  const safeTheme = ['auto', 'light', 'dark'].includes(defaultTheme) ? defaultTheme : 'auto';
-  return `<!DOCTYPE html>
+	const safeTheme = ["auto", "light", "dark"].includes(defaultTheme)
+		? defaultTheme
+		: "auto";
+	return `<!DOCTYPE html>
 <html lang="zh-CN" data-theme="${safeTheme}">
 <head>
   <meta charset="UTF-8">
@@ -443,7 +477,6 @@ function previewPageHtml(
     </main>
   </div>
   <script src="/vendor/mermaid.min.js"></script>
-  <script src="/vendor/html2pdf.bundle.min.js"></script>
   <script>
     (function () {
       const content = document.getElementById('content');
@@ -602,109 +635,36 @@ function previewPageHtml(
         return (base || 'preview') + '.pdf';
       }
 
-      function waitForImages(root, timeoutMs) {
-        const imgs = Array.prototype.slice.call(root.querySelectorAll('img'));
-        if (!imgs.length) return Promise.resolve();
-        return Promise.race([
-          Promise.all(imgs.map(function (img) {
-            if (img.complete) return Promise.resolve();
-            return new Promise(function (resolve) {
-              img.addEventListener('load', resolve, { once: true });
-              img.addEventListener('error', resolve, { once: true });
-            });
-          })),
-          new Promise(function (resolve) { setTimeout(resolve, timeoutMs); }),
-        ]);
-      }
 
-      function buildPdfRoot() {
-        const root = document.createElement('div');
-        root.id = 'pdf-export-root';
-
-        const tocWrap = document.createElement('aside');
-        tocWrap.className = 'pdf-toc';
-        const tocTitle = document.createElement('div');
-        tocTitle.className = 'toc-title';
-        tocTitle.textContent = '目录';
-        tocWrap.appendChild(tocTitle);
-
-        const links = tocNav.querySelectorAll('a');
-        if (!links.length) {
-          const empty = document.createElement('div');
-          empty.className = 'toc-empty';
-          empty.textContent = '（无目录）';
-          tocWrap.appendChild(empty);
-        } else {
-          links.forEach(function (a) {
-            const item = document.createElement('div');
-            item.className = a.className;
-            item.textContent = a.textContent || '';
-            tocWrap.appendChild(item);
-          });
-        }
-
-        const main = document.createElement('div');
-        main.className = 'pdf-main';
-        const article = document.createElement('article');
-        article.className = 'markdown-body';
-        article.innerHTML = content.innerHTML;
-        main.appendChild(article);
-
-        root.appendChild(tocWrap);
-        root.appendChild(main);
-        document.body.appendChild(root);
-        return root;
-      }
 
       function exportPdf() {
         if (pdfBtn.disabled) return;
-        if (typeof html2pdf === 'undefined') {
-          alert('PDF 导出库未加载，请重新打开预览或运行 npm install');
-          return;
-        }
         pdfBtn.disabled = true;
         const prevLabel = pdfBtn.textContent;
         pdfBtn.textContent = '导出中…';
-
-        const root = buildPdfRoot();
-        const fontsReady = (document.fonts && document.fonts.ready)
-          ? document.fonts.ready.catch(function () {})
-          : Promise.resolve();
-
-        fontsReady
-          .then(function () { return waitForImages(root, 3000); })
-          .then(function () {
-            return new Promise(function (resolve) {
-              requestAnimationFrame(function () { requestAnimationFrame(resolve); });
-            });
+        const sid = (location.pathname.split('/')[2] || '').replace(/[^a-f0-9]/gi, '');
+        fetch('/export-pdf/' + sid)
+          .then(function (res) {
+            if (!res.ok) {
+              return res.text().then(function (t) { throw new Error(t || ('HTTP ' + res.status)); });
+            }
+            return res.blob();
           })
-          .then(function () {
-            void root.offsetHeight;
-            return html2pdf()
-              .set({
-                margin: [12, 12, 12, 12],
-                filename: pdfFileName(),
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: {
-                  scale: 2,
-                  useCORS: true,
-                  logging: false,
-                  backgroundColor: '#ffffff',
-                  scrollX: 0,
-                  scrollY: 0,
-                },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
-              })
-              .from(root)
-              .save();
+          .then(function (blob) {
+            const a = document.createElement('a');
+            const href = URL.createObjectURL(blob);
+            a.href = href;
+            a.download = pdfFileName();
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(href);
           })
           .catch(function (err) {
             console.error(err);
-            alert('导出 PDF 失败，请重试');
+            alert('导出 PDF 失败：' + (err && err.message ? err.message : '请重试'));
           })
           .then(function () {
-            if (root.parentNode) root.parentNode.removeChild(root);
             pdfBtn.disabled = false;
             pdfBtn.textContent = prevLabel;
           });
@@ -761,273 +721,353 @@ function previewPageHtml(
 }
 
 export class PreviewServer {
-  private server: http.Server | undefined;
-  private wss: WebSocketServer | undefined;
-  private sessions = new Map<string, PreviewSession>();
-  private port: number;
-  private mediaDir: string;
-  private defaultTheme: string;
-  private started = false;
-  private onIdle: (() => void) | undefined;
-  private pruneTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private server: http.Server | undefined;
+	private wss: WebSocketServer | undefined;
+	private sessions = new Map<string, PreviewSession>();
+	private port: number;
+	private mediaDir: string;
+	private defaultTheme: string;
+	private chromeHint: string;
+	private started = false;
+	private onIdle: (() => void) | undefined;
+	private pruneTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(port: number, extensionPath: string, defaultTheme = 'auto') {
-    this.port = port;
-    this.mediaDir = path.join(extensionPath, 'media');
-    this.defaultTheme = defaultTheme;
-  }
+	constructor(
+		port: number,
+		extensionPath: string,
+		defaultTheme = "auto",
+		chromeHint = "Google Chrome",
+	) {
+		this.port = port;
+		this.mediaDir = path.join(extensionPath, "media");
+		this.defaultTheme = defaultTheme;
+		this.chromeHint = chromeHint;
+	}
 
-  setOnIdle(callback: () => void): void {
-    this.onIdle = callback;
-  }
+	setOnIdle(callback: () => void): void {
+		this.onIdle = callback;
+	}
 
-  getSessionCount(): number {
-    return this.sessions.size;
-  }
+	getSessionCount(): number {
+		return this.sessions.size;
+	}
 
-  hasActiveClients(): boolean {
-    for (const session of this.sessions.values()) {
-      if (session.clients.size > 0) {
-        return true;
-      }
-    }
-    return false;
-  }
+	hasActiveClients(): boolean {
+		for (const session of this.sessions.values()) {
+			if (session.clients.size > 0) {
+				return true;
+			}
+		}
+		return false;
+	}
 
-  private pruneSession(sid: string): void {
-    const session = this.sessions.get(sid);
-    if (session && session.clients.size === 0) {
-      this.sessions.delete(sid);
-      if (this.sessions.size === 0) {
-        this.onIdle?.();
-      }
-    }
-  }
+	private pruneSession(sid: string): void {
+		const session = this.sessions.get(sid);
+		if (session && session.clients.size === 0) {
+			this.sessions.delete(sid);
+			if (this.sessions.size === 0) {
+				this.onIdle?.();
+			}
+		}
+	}
 
-  private schedulePrune(sid: string): void {
-    const existing = this.pruneTimers.get(sid);
-    if (existing) {
-      clearTimeout(existing);
-    }
-    this.pruneTimers.set(
-      sid,
-      setTimeout(() => {
-        this.pruneTimers.delete(sid);
-        this.pruneSession(sid);
-      }, 2000),
-    );
-  }
+	private schedulePrune(sid: string): void {
+		const existing = this.pruneTimers.get(sid);
+		if (existing) {
+			clearTimeout(existing);
+		}
+		this.pruneTimers.set(
+			sid,
+			setTimeout(() => {
+				this.pruneTimers.delete(sid);
+				this.pruneSession(sid);
+			}, 2000),
+		);
+	}
 
-  private cancelPrune(sid: string): void {
-    const t = this.pruneTimers.get(sid);
-    if (t) {
-      clearTimeout(t);
-      this.pruneTimers.delete(sid);
-    }
-  }
+	private cancelPrune(sid: string): void {
+		const t = this.pruneTimers.get(sid);
+		if (t) {
+			clearTimeout(t);
+			this.pruneTimers.delete(sid);
+		}
+	}
 
-  get isRunning(): boolean {
-    return this.started;
-  }
+	get isRunning(): boolean {
+		return this.started;
+	}
 
-  getPort(): number {
-    return this.port;
-  }
+	getPort(): number {
+		return this.port;
+	}
 
-  async start(): Promise<number> {
-    if (this.started) {
-      return this.port;
-    }
+	async start(): Promise<number> {
+		if (this.started) {
+			return this.port;
+		}
 
-    this.server = http.createServer((req, res) => this.handleHttp(req, res));
-    this.wss = new WebSocketServer({ noServer: true });
+		this.server = http.createServer((req, res) => this.handleHttp(req, res));
+		this.wss = new WebSocketServer({ noServer: true });
 
-    this.server.on('upgrade', (req, socket, head) => {
-      const url = new URL(req.url || '/', `http://${req.headers.host}`);
-      const sid = url.pathname.replace(/^\/ws\//, '');
-      const session = this.sessions.get(sid);
-      if (!session || !url.pathname.startsWith('/ws/')) {
-        socket.destroy();
-        return;
-      }
-      this.wss!.handleUpgrade(req, socket, head, (ws) => {
-        this.cancelPrune(sid);
-        session.clients.add(ws);
-        ws.on('close', () => {
-          session.clients.delete(ws);
-          if (session.clients.size === 0) {
-            this.schedulePrune(sid);
-          }
-        });
-      });
-    });
+		this.server.on("upgrade", (req, socket, head) => {
+			const url = new URL(req.url || "/", `http://${req.headers.host}`);
+			const sid = url.pathname.replace(/^\/ws\//, "");
+			const session = this.sessions.get(sid);
+			if (!session || !url.pathname.startsWith("/ws/")) {
+				socket.destroy();
+				return;
+			}
+			this.wss!.handleUpgrade(req, socket, head, (ws) => {
+				this.cancelPrune(sid);
+				session.clients.add(ws);
+				ws.on("close", () => {
+					session.clients.delete(ws);
+					if (session.clients.size === 0) {
+						this.schedulePrune(sid);
+					}
+				});
+			});
+		});
 
-    await new Promise<void>((resolve, reject) => {
-      const tryListen = (port: number, retries: number) => {
-        const onError = (err: NodeJS.ErrnoException) => {
-          if (err.code === 'EADDRINUSE' && retries > 0) {
-            this.server!.close(() => tryListen(port + 1, retries - 1));
-          } else {
-            reject(err);
-          }
-        };
-        this.server!.once('error', onError);
-        this.server!.listen(port, '127.0.0.1', () => {
-          this.server!.off('error', onError);
-          this.port = port;
-          this.started = true;
-          resolve();
-        });
-      };
-      tryListen(this.port, 20);
-    });
+		await new Promise<void>((resolve, reject) => {
+			const tryListen = (port: number, retries: number) => {
+				const onError = (err: NodeJS.ErrnoException) => {
+					if (err.code === "EADDRINUSE" && retries > 0) {
+						this.server!.close(() => tryListen(port + 1, retries - 1));
+					} else {
+						reject(err);
+					}
+				};
+				this.server!.once("error", onError);
+				this.server!.listen(port, "127.0.0.1", () => {
+					this.server!.off("error", onError);
+					this.port = port;
+					this.started = true;
+					resolve();
+				});
+			};
+			tryListen(this.port, 20);
+		});
 
-    return this.port;
-  }
+		return this.port;
+	}
 
-  previewUrl(filePath: string): string {
-    const sid = sessionId(filePath);
-    return `http://127.0.0.1:${this.port}/preview/${sid}/${filePathInUrl(filePath)}`;
-  }
+	previewUrl(filePath: string): string {
+		const sid = sessionId(filePath);
+		return `http://127.0.0.1:${this.port}/preview/${sid}/${filePathInUrl(filePath)}`;
+	}
 
-  register(filePath: string, source: string): string {
-    const sid = sessionId(filePath);
-    if (!this.sessions.has(sid)) {
-      this.sessions.set(sid, { filePath, clients: new Set() });
-    } else {
-      this.sessions.get(sid)!.filePath = filePath;
-    }
-    this.pushUpdate(filePath, source);
-    return this.previewUrl(filePath);
-  }
+	register(filePath: string, source: string): string {
+		const sid = sessionId(filePath);
+		if (!this.sessions.has(sid)) {
+			this.sessions.set(sid, { filePath, clients: new Set() });
+		} else {
+			this.sessions.get(sid)!.filePath = filePath;
+		}
+		this.pushUpdate(filePath, source);
+		return this.previewUrl(filePath);
+	}
 
-  pushUpdate(filePath: string, source: string): void {
-    const sid = sessionId(filePath);
-    const session = this.sessions.get(sid);
-    if (!session || session.clients.size === 0) {
-      return;
-    }
-    const html = renderMarkdown(filePath, source);
-    const payload = JSON.stringify({ type: 'update', html });
-    for (const client of session.clients) {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(payload);
-      }
-    }
-  }
+	pushUpdate(filePath: string, source: string): void {
+		const sid = sessionId(filePath);
+		const session = this.sessions.get(sid);
+		if (!session || session.clients.size === 0) {
+			return;
+		}
+		const html = renderMarkdown(filePath, source);
+		const payload = JSON.stringify({ type: "update", html });
+		for (const client of session.clients) {
+			if (client.readyState === WebSocket.OPEN) {
+				client.send(payload);
+			}
+		}
+	}
 
-  private handleHttp(req: http.IncomingMessage, res: http.ServerResponse): void {
-    const url = new URL(req.url || '/', `http://${req.headers.host}`);
+	private handleHttp(
+		req: http.IncomingMessage,
+		res: http.ServerResponse,
+	): void {
+		const url = new URL(req.url || "/", `http://${req.headers.host}`);
 
-    if (url.pathname.startsWith('/preview/')) {
-      const route = parsePreviewRoute(url.pathname);
-      if (!route) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('无效的预览地址');
-        return;
-      }
-      const session = this.sessions.get(route.sid);
-      if (!session) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('预览会话不存在，请从编辑器重新打开');
-        return;
-      }
-      let source: string;
-      try {
-        source = fs.readFileSync(session.filePath, 'utf8');
-      } catch {
-        res.writeHead(500);
-        res.end('无法读取文件');
-        return;
-      }
-      const title = path.basename(session.filePath);
-      const body = renderMarkdown(session.filePath, source);
-      const page = previewPageHtml(title, body, `/ws/${route.sid}`, this.defaultTheme, session.filePath);
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(page);
-      return;
-    }
+		if (url.pathname.startsWith("/preview/")) {
+			const route = parsePreviewRoute(url.pathname);
+			if (!route) {
+				res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+				res.end("无效的预览地址");
+				return;
+			}
+			const session = this.sessions.get(route.sid);
+			if (!session) {
+				res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+				res.end("预览会话不存在，请从编辑器重新打开");
+				return;
+			}
+			let source: string;
+			try {
+				source = fs.readFileSync(session.filePath, "utf8");
+			} catch {
+				res.writeHead(500);
+				res.end("无法读取文件");
+				return;
+			}
+			const title = path.basename(session.filePath);
+			const body = renderMarkdown(session.filePath, source);
+			const page = previewPageHtml(
+				title,
+				body,
+				`/ws/${route.sid}`,
+				this.defaultTheme,
+				session.filePath,
+			);
+			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+			res.end(page);
+			return;
+		}
 
-    if (url.pathname === '/vendor/mermaid.min.js') {
-      const file = path.join(this.mediaDir, 'mermaid.min.js');
-      if (!fs.existsSync(file)) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('mermaid.min.js missing — run npm install');
-        return;
-      }
-      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
-      fs.createReadStream(file).pipe(res);
-      return;
-    }
+		if (url.pathname === "/vendor/mermaid.min.js") {
+			const file = path.join(this.mediaDir, "mermaid.min.js");
+			if (!fs.existsSync(file)) {
+				res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+				res.end("mermaid.min.js missing — run npm install");
+				return;
+			}
+			res.writeHead(200, {
+				"Content-Type": "application/javascript; charset=utf-8",
+			});
+			fs.createReadStream(file).pipe(res);
+			return;
+		}
 
-    if (url.pathname === '/vendor/html2pdf.bundle.min.js') {
-      const file = path.join(this.mediaDir, 'html2pdf.bundle.min.js');
-      if (!fs.existsSync(file)) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('html2pdf.bundle.min.js missing — run npm install');
-        return;
-      }
-      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
-      fs.createReadStream(file).pipe(res);
-      return;
-    }
+		if (url.pathname === "/asset") {
+			const assetPath = url.searchParams.get("path");
+			if (!assetPath) {
+				res.writeHead(400);
+				res.end("missing path");
+				return;
+			}
+			const resolved = path.resolve(assetPath);
+			if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+				res.writeHead(404);
+				res.end("not found");
+				return;
+			}
+			const ext = path.extname(resolved).toLowerCase();
+			const mime: Record<string, string> = {
+				".png": "image/png",
+				".jpg": "image/jpeg",
+				".jpeg": "image/jpeg",
+				".gif": "image/gif",
+				".webp": "image/webp",
+				".svg": "image/svg+xml",
+			};
+			res.writeHead(200, {
+				"Content-Type": mime[ext] || "application/octet-stream",
+			});
+			fs.createReadStream(resolved).pipe(res);
+			return;
+		}
 
-    if (url.pathname === '/asset') {
-      const assetPath = url.searchParams.get('path');
-      if (!assetPath) {
-        res.writeHead(400);
-        res.end('missing path');
-        return;
-      }
-      const resolved = path.resolve(assetPath);
-      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
-        res.writeHead(404);
-        res.end('not found');
-        return;
-      }
-      const ext = path.extname(resolved).toLowerCase();
-      const mime: Record<string, string> = {
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.gif': 'image/gif',
-        '.webp': 'image/webp',
-        '.svg': 'image/svg+xml',
-      };
-      res.writeHead(200, { 'Content-Type': mime[ext] || 'application/octet-stream' });
-      fs.createReadStream(resolved).pipe(res);
-      return;
-    }
+		if (url.pathname.startsWith("/print/")) {
+			const sid = url.pathname.replace(/^\/print\//, "").split("/")[0];
+			const session = this.sessions.get(sid);
+			if (!session) {
+				res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+				res.end("preview session not found");
+				return;
+			}
+			let source: string;
+			try {
+				source = fs.readFileSync(session.filePath, "utf8");
+			} catch {
+				res.writeHead(500);
+				res.end("cannot read file");
+				return;
+			}
+			const title = path.basename(session.filePath);
+			const body = renderMarkdown(session.filePath, source);
+			const page = printPageHtml(title, body);
+			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+			res.end(page);
+			return;
+		}
 
-    res.writeHead(404);
-    res.end('not found');
-  }
+		if (url.pathname.startsWith("/export-pdf/")) {
+			const sid = url.pathname.replace(/^\/export-pdf\//, "").split("/")[0];
+			void this.handleExportPdf(sid, res);
+			return;
+		}
 
-  async stop(): Promise<void> {
-    for (const t of this.pruneTimers.values()) {
-      clearTimeout(t);
-    }
-    this.pruneTimers.clear();
-    for (const session of this.sessions.values()) {
-      for (const client of session.clients) {
-        client.close();
-      }
-    }
-    this.sessions.clear();
-    await new Promise<void>((resolve) => {
-      if (this.wss) {
-        this.wss.close(() => resolve());
-      } else {
-        resolve();
-      }
-    });
-    await new Promise<void>((resolve) => {
-      if (this.server) {
-        this.server.close(() => resolve());
-      } else {
-        resolve();
-      }
-    });
-    this.started = false;
-  }
+		res.writeHead(404);
+		res.end("not found");
+	}
+
+	private async handleExportPdf(
+		sid: string,
+		res: http.ServerResponse,
+	): Promise<void> {
+		const session = this.sessions.get(sid);
+		if (!session) {
+			res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+			res.end("preview session not found");
+			return;
+		}
+		const chrome = resolveChromeExecutable(this.chromeHint);
+		if (!chrome) {
+			res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+			res.end("Chrome/Chromium not found for PDF export");
+			return;
+		}
+		const outPath = path.join(os.tmpdir(), `kk-md-${sid}-${Date.now()}.pdf`);
+		const printUrl = `http://127.0.0.1:${this.port}/print/${sid}`;
+		try {
+			await printUrlToPdf(chrome, printUrl, outPath);
+			const buf = fs.readFileSync(outPath);
+			const name =
+				path.basename(session.filePath).replace(/\.md$/i, "") + ".pdf";
+			res.writeHead(200, {
+				"Content-Type": "application/pdf",
+				"Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+				"Content-Length": buf.length,
+			});
+			res.end(buf);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+			res.end("PDF export failed: " + msg);
+		} finally {
+			try {
+				fs.unlinkSync(outPath);
+			} catch {
+				/* ignore */
+			}
+		}
+	}
+
+	async stop(): Promise<void> {
+		for (const t of this.pruneTimers.values()) {
+			clearTimeout(t);
+		}
+		this.pruneTimers.clear();
+		for (const session of this.sessions.values()) {
+			for (const client of session.clients) {
+				client.close();
+			}
+		}
+		this.sessions.clear();
+		await new Promise<void>((resolve) => {
+			if (this.wss) {
+				this.wss.close(() => resolve());
+			} else {
+				resolve();
+			}
+		});
+		await new Promise<void>((resolve) => {
+			if (this.server) {
+				this.server.close(() => resolve());
+			} else {
+				resolve();
+			}
+		});
+		this.started = false;
+	}
 }

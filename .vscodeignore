@@ -6,3 +6,8 @@ esbuild.js
 tsconfig.json
 **/*.ts
 **/*.map
+out/e2e/**
+scripts/**
+docs/**
+.impeccable/**
+media/html2pdf.bundle.min.js

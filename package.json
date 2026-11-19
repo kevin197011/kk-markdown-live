@@ -1,118 +1,117 @@
 {
-  "name": "kk-markdown-live",
-  "displayName": "KK Markdown Live",
-  "description": "右键在 Chrome 中预览 Markdown，保存即刷新，方便查看需求文档",
-  "version": "0.5.0",
-  "publisher": "kk",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/kevin197011/kk-markdown-live.git"
-  },
-  "engines": {
-    "vscode": "^1.80.0"
-  },
-  "categories": [
-    "Other"
-  ],
-  "keywords": [
-    "markdown",
-    "preview",
-    "chrome",
-    "live",
-    "requirements"
-  ],
-  "activationEvents": [
-    "onLanguage:markdown"
-  ],
-  "main": "./out/extension.js",
-  "contributes": {
-    "commands": [
-      {
-        "command": "kk-markdown-live.openPreview",
-        "title": "在 Chrome 中预览 Markdown",
-        "icon": "$(open-preview)"
-      },
-      {
-        "command": "kk-markdown-live.openPreviewToSide",
-        "title": "在 Chrome 中预览（新窗口）"
-      }
-    ],
-    "menus": {
-      "editor/context": [
-        {
-          "command": "kk-markdown-live.openPreview",
-          "when": "resourceLangId == markdown",
-          "group": "navigation@1"
-        }
-      ],
-      "explorer/context": [
-        {
-          "command": "kk-markdown-live.openPreview",
-          "when": "resourceExtname == .md",
-          "group": "navigation@1"
-        }
-      ],
-      "editor/title": [
-        {
-          "command": "kk-markdown-live.openPreview",
-          "when": "resourceLangId == markdown",
-          "group": "navigation@1"
-        }
-      ]
-    },
-    "configuration": {
-      "title": "KK Markdown Live",
-      "properties": {
-        "kk-markdown-live.port": {
-          "type": "number",
-          "default": 19527,
-          "description": "预览 HTTP 服务端口"
-        },
-        "kk-markdown-live.browser": {
-          "type": "string",
-          "default": "Google Chrome",
-          "description": "macOS 下 open -a 使用的浏览器名称"
-        },
-        "kk-markdown-live.debounceMs": {
-          "type": "number",
-          "default": 300,
-          "description": "编辑时刷新防抖毫秒数"
-        },
-        "kk-markdown-live.theme": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "light",
-            "dark"
-          ],
-          "default": "auto",
-          "description": "预览页默认主题（浏览器内可点击切换，选择会记住）"
-        }
-      }
-    }
-  },
-  "scripts": {
-    "postinstall": "node scripts/copy-vendor.js",
-    "vscode:prepublish": "npm run compile",
-    "compile": "node esbuild.js",
-    "watch": "node esbuild.js --watch",
-    "package": "vsce package --no-dependencies",
-    "lint": "tsc --noEmit"
-  },
-  "devDependencies": {
-    "@types/node": "^20.14.0",
-    "@types/vscode": "^1.80.0",
-    "@types/ws": "^8.5.10",
-    "@vscode/vsce": "^2.26.0",
-    "esbuild": "^0.21.5",
-    "typescript": "^5.5.0"
-  },
-  "dependencies": {
-    "highlight.js": "^11.10.0",
-    "html2pdf.js": "^0.14.0",
-    "marked": "^12.0.2",
-    "mermaid": "^11.4.0",
-    "ws": "^8.18.0"
-  }
+	"name": "kk-markdown-live",
+	"displayName": "KK Markdown Live",
+	"description": "Right-click to preview Markdown in Chrome; live refresh while you edit",
+	"version": "0.5.1",
+	"publisher": "kk",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/kevin197011/kk-markdown-live.git"
+	},
+	"engines": {
+		"vscode": "^1.80.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"keywords": [
+		"markdown",
+		"preview",
+		"chrome",
+		"live",
+		"requirements"
+	],
+	"activationEvents": [
+		"onLanguage:markdown"
+	],
+	"main": "./out/extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "kk-markdown-live.openPreview",
+				"title": "Preview Markdown in Chrome",
+				"icon": "$(open-preview)"
+			},
+			{
+				"command": "kk-markdown-live.openPreviewToSide",
+				"title": "Preview Markdown in Chrome (New Window)"
+			}
+		],
+		"menus": {
+			"editor/context": [
+				{
+					"command": "kk-markdown-live.openPreview",
+					"when": "resourceLangId == markdown",
+					"group": "navigation@1"
+				}
+			],
+			"explorer/context": [
+				{
+					"command": "kk-markdown-live.openPreview",
+					"when": "resourceExtname == .md",
+					"group": "navigation@1"
+				}
+			],
+			"editor/title": [
+				{
+					"command": "kk-markdown-live.openPreview",
+					"when": "resourceLangId == markdown",
+					"group": "navigation@1"
+				}
+			]
+		},
+		"configuration": {
+			"title": "KK Markdown Live",
+			"properties": {
+				"kk-markdown-live.port": {
+					"type": "number",
+					"default": 19527,
+					"description": "HTTP port for the preview server"
+				},
+				"kk-markdown-live.browser": {
+					"type": "string",
+					"default": "Google Chrome",
+					"description": "Browser name for macOS open -a"
+				},
+				"kk-markdown-live.debounceMs": {
+					"type": "number",
+					"default": 300,
+					"description": "Debounce (ms) for live refresh while typing"
+				},
+				"kk-markdown-live.theme": {
+					"type": "string",
+					"enum": [
+						"auto",
+						"light",
+						"dark"
+					],
+					"default": "auto",
+					"description": "Default preview theme (toggle in-page; remembered in localStorage)"
+				}
+			}
+		}
+	},
+	"scripts": {
+		"postinstall": "node scripts/copy-vendor.js",
+		"vscode:prepublish": "npm run compile",
+		"compile": "node esbuild.js",
+		"watch": "node esbuild.js --watch",
+		"package": "vsce package --no-dependencies",
+		"lint": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@types/node": "^20.14.0",
+		"@types/vscode": "^1.80.0",
+		"@types/ws": "^8.5.10",
+		"@vscode/vsce": "^2.26.0",
+		"esbuild": "^0.21.5",
+		"typescript": "^5.5.0"
+	},
+	"dependencies": {
+		"highlight.js": "^11.10.0",
+		"marked": "^12.0.2",
+		"mermaid": "^11.4.0",
+		"ws": "^8.18.0"
+	}
 }
